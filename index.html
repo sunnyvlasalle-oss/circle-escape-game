@@ -1,0 +1,302 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Play Circle Escape, a free neon arcade game. Dodge obstacles and beat your survival record!">
+<title>Circle Escape — Survive the Arena</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;min-height:100vh;padding:18px;
+ display:flex;justify-content:center;align-items:center;
+ background:radial-gradient(circle at top,#252052,#0b0d1c 70%);
+ color:#fff;font-family:Arial,sans-serif
+}
+.game{width:100%;max-width:520px;text-align:center}
+h1{font-size:clamp(2rem,8vw,3rem);margin:0 0 8px}
+.subtitle{color:#b8b9dc;margin:0 0 20px}
+.panel{
+ background:#ffffff0c;border:1px solid #ffffff20;
+ padding:18px;border-radius:22px;box-shadow:0 15px 45px #0005
+}
+.stats{display:flex;gap:10px;margin-bottom:14px}
+.stat{flex:1;padding:11px 4px;background:#ffffff0d;border-radius:12px}
+.stat small{display:block;color:#b8b9dc;margin-bottom:5px}
+.stat strong{font-size:1.35rem}
+canvas{
+ display:block;width:100%;aspect-ratio:1/1;
+ background:#0b1020;border-radius:16px;border:1px solid #ffffff20;
+ touch-action:none
+}
+.status{min-height:25px;margin:14px 0 5px;font-weight:bold}
+.primary{
+ width:100%;padding:15px;border:0;border-radius:12px;
+ background:#b69aff;color:#17132d;font-size:1rem;
+ font-weight:bold;cursor:pointer;margin-top:10px
+}
+.controls{display:flex;justify-content:center;gap:16px;margin-top:12px}
+.control{
+ width:64px;height:54px;border-radius:14px;border:1px solid #ffffff30;
+ background:#ffffff12;color:white;font-size:1.5rem;touch-action:none;
+ user-select:none
+}
+.help{font-size:.85rem;line-height:1.5;color:#a9accd;margin:14px 0 0}
+.footer{font-size:.8rem;color:#8286ad;margin-top:18px}
+</style>
+</head>
+<body>
+<main class="game">
+ <h1>🟣 Circle Escape</h1>
+ <p class="subtitle">Dodge. Survive. Beat your record.</p>
+
+ <section class="panel">
+  <div class="stats">
+   <div class="stat"><small>⭐ Score</small><strong id="score">0</strong></div>
+   <div class="stat"><small>⏱️ Time</small><strong id="time">0.0s</strong></div>
+   <div class="stat"><small>🏆 Best</small><strong id="best">0</strong></div>
+  </div>
+
+  <canvas id="arena" width="480" height="480" aria-label="Circle Escape game arena"></canvas>
+  <div class="status" id="status" aria-live="polite">Ready? Enter the arena!</div>
+  <button class="primary" id="start">START SURVIVAL ▶</button>
+
+  <div class="controls">
+   <button class="control" id="left" aria-label="Move left">◀</button>
+   <button class="control" id="up" aria-label="Move up">▲</button>
+   <button class="control" id="down" aria-label="Move down">▼</button>
+   <button class="control" id="right" aria-label="Move right">▶</button>
+  </div>
+  <p class="help">Move with WASD, arrow keys or the buttons. Avoid red blocks and collect cyan orbs. The arena gets faster as you survive!</p>
+ </section>
+ <p class="footer">One hit. Game over. How long can you last?</p>
+</main>
+
+<script>
+const canvas=document.getElementById("arena");
+const ctx=canvas.getContext("2d");
+const $=id=>document.getElementById(id);
+
+const W=480,H=480;
+let player={x:W/2,y:H/2,r:9,speed:230};
+let obstacles=[],orbs=[];
+let running=false,lastTime=0,elapsed=0,score=0,best=Number(localStorage.getItem("circleEscapeBest")||0);
+let spawnObstacle=0,spawnOrb=0,animation=0;
+const keys={};
+
+$("best").textContent=best;
+
+function reset(){
+ player={x:W/2,y:H/2,r:9,speed:230};
+ obstacles=[];orbs=[];elapsed=0;score=0;
+ spawnObstacle=0;spawnOrb=1;lastTime=0;
+ updateStats();
+}
+
+function updateStats(){
+ $("score").textContent=score;
+ $("time").textContent=elapsed.toFixed(1)+"s";
+ $("best").textContent=best;
+}
+
+function randomEdge(){
+ const edge=Math.floor(Math.random()*4);
+ if(edge===0)return{x:Math.random()*W,y:-20,vx:0,vy:1};
+ if(edge===1)return{x:W+20,y:Math.random()*H,vx:-1,vy:0};
+ if(edge===2)return{x:Math.random()*W,y:H+20,vx:0,vy:-1};
+ return{x:-20,y:Math.random()*H,vx:1,vy:0};
+}
+
+function addObstacle(){
+ const p=randomEdge();
+ const speed=75+Math.min(elapsed*2.8,145);
+ const angle=Math.atan2(player.y-p.y,player.x-p.x);
+ const spread=(Math.random()-.5)*.5;
+ const a=angle+spread;
+ const size=12+Math.random()*8;
+ obstacles.push({
+  x:p.x,y:p.y,
+  vx:Math.cos(a)*speed,vy:Math.sin(a)*speed,
+  size
+ });
+}
+
+function addOrb(){
+ let x,y;
+ do{
+  x=20+Math.random()*(W-40);
+  y=20+Math.random()*(H-40);
+ }while(Math.hypot(x-player.x,y-player.y)<80);
+
+ orbs.push({x,y,r:7,pulse:Math.random()*6});
+}
+
+function drawBackground(){
+ ctx.fillStyle="#0b1020";
+ ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle="#ffffff0c";
+ ctx.lineWidth=1;
+ for(let x=0;x<W;x+=30){
+  ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();
+ }
+ for(let y=0;y<H;y+=30){
+  ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+ }
+}
+
+function draw(){
+ drawBackground();
+
+ for(const orb of orbs){
+  ctx.save();
+  ctx.shadowColor="#50f5ff";
+  ctx.shadowBlur=18;
+  ctx.fillStyle="#50f5ff";
+  ctx.beginPath();
+  ctx.arc(orb.x,orb.y,orb.r+Math.sin(orb.pulse)*1.5,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+ }
+
+ for(const o of obstacles){
+  ctx.save();
+  ctx.translate(o.x,o.y);
+  ctx.rotate(Math.atan2(o.vy,o.vx));
+  ctx.shadowColor="#ff416d";
+  ctx.shadowBlur=12;
+  ctx.fillStyle="#ff416d";
+  ctx.fillRect(-o.size/2,-o.size/2,o.size,o.size);
+  ctx.restore();
+ }
+
+ ctx.save();
+ ctx.shadowColor="#b69aff";
+ ctx.shadowBlur=24;
+ ctx.fillStyle="#b69aff";
+ ctx.beginPath();
+ ctx.arc(player.x,player.y,player.r,0,Math.PI*2);
+ ctx.fill();
+ ctx.restore();
+
+ if(!running&&elapsed===0){
+  ctx.fillStyle="#ffffffcc";
+  ctx.font="bold 20px Arial";
+  ctx.textAlign="center";
+  ctx.fillText("DODGE THE RED BLOCKS",W/2,H/2+55);
+ }
+}
+
+function endGame(){
+ if(!running)return;
+ running=false;
+ if(score>best){
+  best=score;
+  localStorage.setItem("circleEscapeBest",String(best));
+ }
+ updateStats();
+ $("status").textContent="💥 Game over! Score: "+score+" — survived "+elapsed.toFixed(1)+"s";
+ $("start").textContent="PLAY AGAIN ↻";
+ draw();
+}
+
+function update(dt){
+ elapsed+=dt;
+ score=Math.floor(elapsed*2);
+ spawnObstacle-=dt;
+ spawnOrb-=dt;
+
+ const speed=player.speed;
+ let dx=0,dy=0;
+ if(keys.ArrowLeft||keys.a||keys.left)dx--;
+ if(keys.ArrowRight||keys.d||keys.right)dx++;
+ if(keys.ArrowUp||keys.w||keys.up)dy--;
+ if(keys.ArrowDown||keys.s||keys.down)dy++;
+
+ if(dx&&dy){dx*=Math.SQRT1_2;dy*=Math.SQRT1_2}
+ player.x=Math.max(player.r,Math.min(W-player.r,player.x+dx*speed*dt));
+ player.y=Math.max(player.r,Math.min(H-player.r,player.y+dy*speed*dt));
+
+ if(spawnObstacle<=0){
+  addObstacle();
+  spawnObstacle=Math.max(.22,.85-elapsed*.012);
+ }
+ if(spawnOrb<=0){
+  addOrb();
+  spawnOrb=2.7+Math.random()*1.8;
+ }
+
+ for(const o of obstacles){
+  o.x+=o.vx*dt;
+  o.y+=o.vy*dt;
+
+  const nearestX=Math.max(o.x-o.size/2,Math.min(player.x,o.x+o.size/2));
+  const nearestY=Math.max(o.y-o.size/2,Math.min(player.y,o.y+o.size/2));
+  if(Math.hypot(player.x-nearestX,player.y-nearestY)<player.r){
+   endGame();return;
+  }
+ }
+ obstacles=obstacles.filter(o=>o.x>-45&&o.x<W+45&&o.y>-45&&o.y<H+45);
+
+ for(const orb of orbs)orb.pulse+=dt*5;
+ orbs=orbs.filter(orb=>{
+  if(Math.hypot(player.x-orb.x,player.y-orb.y)<player.r+orb.r){
+   score+=25;
+   return false;
+  }
+  return true;
+ });
+
+ updateStats();
+}
+
+function loop(timestamp){
+ if(!running)return;
+ if(!lastTime)lastTime=timestamp;
+ const dt=Math.min((timestamp-lastTime)/1000,.04);
+ lastTime=timestamp;
+ update(dt);
+ draw();
+ if(running)animation=requestAnimationFrame(loop);
+}
+
+function startGame(){
+ cancelAnimationFrame(animation);
+ reset();
+ running=true;
+ $("status").textContent="🔥 Survive as long as you can!";
+ $("start").textContent="RESTART GAME ↻";
+ animation=requestAnimationFrame(loop);
+}
+
+document.addEventListener("keydown",e=>{
+ const key=e.key.length===1?e.key.toLowerCase():e.key;
+ if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(e.key))e.preventDefault();
+ keys[key]=true;
+ if(!running&&e.key==="Enter")startGame();
+});
+document.addEventListener("keyup",e=>{
+ const key=e.key.length===1?e.key.toLowerCase():e.key;
+ keys[key]=false;
+});
+window.addEventListener("blur",()=>Object.keys(keys).forEach(k=>keys[k]=false));
+
+function bindControl(id,key){
+ const button=$(id);
+ const down=e=>{e.preventDefault();keys[key]=true};
+ const up=e=>{e.preventDefault();keys[key]=false};
+ button.addEventListener("pointerdown",down);
+ button.addEventListener("pointerup",up);
+ button.addEventListener("pointercancel",up);
+ button.addEventListener("pointerleave",up);
+}
+bindControl("left","left");
+bindControl("right","right");
+bindControl("up","up");
+bindControl("down","down");
+
+$("start").addEventListener("click",startGame);
+draw();
+</script>
+</body>
+</html>
